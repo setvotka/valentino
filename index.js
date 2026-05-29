@@ -1,7 +1,12 @@
 const {
   Client,
   GatewayIntentBits,
-  PermissionsBitField
+  PermissionsBitField,
+  ChannelType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder
 } = require("discord.js");
 
 const client = new Client({
@@ -13,16 +18,32 @@ const client = new Client({
   ]
 });
 
-// TOKEN BURADA YOK
-// hosting sağlayıcıdan gelecek
-
 const PREFIX = "v!";
 const GUILD_ID = "1510001451533991968";
+
+// TOKEN ARTIK BURADA YOK
+const TOKEN = process.env.TOKEN;
+
+let logChannel = null;
 
 client.once("ready", () => {
   console.log(`${client.user.tag} aktif`);
 });
 
+// JOIN / LEAVE LOG
+client.on("guildMemberAdd", member => {
+  if (!logChannel) return;
+  const ch = member.guild.channels.cache.get(logChannel);
+  if (ch) ch.send(`[JOIN] ${member.user.tag}`);
+});
+
+client.on("guildMemberRemove", member => {
+  if (!logChannel) return;
+  const ch = member.guild.channels.cache.get(logChannel);
+  if (ch) ch.send(`[LEAVE] ${member.user.tag}`);
+});
+
+// COMMANDS
 client.on("messageCreate", async (message) => {
   if (!message.guild) return;
   if (message.guild.id !== GUILD_ID) return;
@@ -32,18 +53,114 @@ client.on("messageCreate", async (message) => {
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const cmd = args.shift().toLowerCase();
 
-  if (cmd === "ping") {
-    return message.reply("pong");
+  // LOG SET
+  if (cmd === "log") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("yetkin yok");
+
+    const ch = message.mentions.channels.first();
+    if (!ch) return message.reply("kanal etiketle");
+
+    logChannel = ch.id;
+    return message.reply("log ayarlandı");
   }
 
+  // BAN
   if (cmd === "ban") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers))
-      return message.reply("yetki yok");
+      return message.reply("yetkin yok");
 
     const user = message.mentions.members.first();
-    if (!user) return message.reply("etiketle");
+    if (!user) return message.reply("kullanıcı etiketle");
 
     await user.ban();
     return message.reply("banlandı");
   }
+
+  // KICK
+  if (cmd === "kick") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers))
+      return message.reply("yetkin yok");
+
+    const user = message.mentions.members.first();
+    if (!user) return message.reply("kullanıcı etiketle");
+
+    await user.kick();
+    return message.reply("atıldı");
+  }
+
+  // CLEAR
+  if (cmd === "clear") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages))
+      return message.reply("yetkin yok");
+
+    const amount = parseInt(args[0]);
+    if (!amount || amount > 100) return message.reply("1-100");
+
+    await message.channel.bulkDelete(amount);
+    return message.reply("silindi").then(m => setTimeout(() => m.delete(), 2000));
+  }
+
+  // TICKET PANEL
+  if (cmd === "ticketpanel") {
+    const embed = new EmbedBuilder()
+      .setTitle("Ticket Sistemi")
+      .setDescription("Ticket açmak için butona bas")
+      .setColor("Blue");
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("ticket_open")
+        .setLabel("Ticket Aç")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
 });
+
+// BUTTONS
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  if (interaction.customId === "ticket_open") {
+    const channel = await interaction.guild.channels.create({
+      name: `ticket-${interaction.user.username}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        {
+          id: interaction.guild.id,
+          deny: [PermissionsBitField.Flags.ViewChannel]
+        },
+        {
+          id: interaction.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory
+          ]
+        }
+      ]
+    });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("ticket_close")
+        .setLabel("Ticket Kapat")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    channel.send({ content: `${interaction.user}`, components: [row] });
+
+    return interaction.reply({ content: "ticket açıldı", ephemeral: true });
+  }
+
+  if (interaction.customId === "ticket_close") {
+    if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels))
+      return interaction.reply({ content: "yetkin yok", ephemeral: true });
+
+    return interaction.channel.delete();
+  }
+});
+
+client.login(TOKEN);
